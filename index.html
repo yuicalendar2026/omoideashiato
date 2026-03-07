@@ -1,28 +1,32 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
+
 <meta charset="UTF-8">
-<title>神日記 Ultimate</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>神日記 Ultimate Pro</title>
+
+<meta name="viewport" content="width=device-width,initial-scale=1">
+
+<link rel="manifest" href="manifest.json">
 
 <style>
 
 body{
 font-family:-apple-system;
 margin:0;
-background:#f5f7fb;
+background:#f4f6fb;
 }
 
 header{
-background:#111;
+background:#000;
 color:white;
-padding:16px;
+padding:15px;
 text-align:center;
 font-size:20px;
 }
 
 .container{
-padding:16px;
+padding:15px;
 max-width:800px;
 margin:auto;
 }
@@ -31,26 +35,24 @@ textarea{
 width:100%;
 height:90px;
 border-radius:10px;
-border:1px solid #ccc;
 padding:10px;
-font-size:16px;
+border:1px solid #ccc;
 }
 
 button{
 width:100%;
-margin-top:8px;
 padding:12px;
+margin-top:8px;
 border:none;
 border-radius:10px;
 background:#007aff;
 color:white;
-font-size:16px;
 }
 
 .entry{
 background:white;
-margin-top:12px;
 padding:12px;
+margin-top:10px;
 border-radius:12px;
 }
 
@@ -61,63 +63,74 @@ gap:6px;
 margin-top:8px;
 }
 
-.media img,.media video{
+.media img{
 width:100%;
 border-radius:8px;
-}
-
-.calendarHeader{
-display:flex;
-justify-content:space-between;
-align-items:center;
-margin-top:15px;
+cursor:pointer;
 }
 
 .calendar{
 display:grid;
 grid-template-columns:repeat(7,1fr);
-gap:4px;
-margin-top:5px;
+gap:5px;
+margin-top:10px;
 }
 
 .day{
 background:white;
 padding:10px;
+border-radius:8px;
 text-align:center;
-border-radius:6px;
-font-size:14px;
 }
 
 .hasDiary{
 background:#ffe082;
 }
 
-.today{
-border:2px solid #007aff;
+.lock{
+position:fixed;
+top:0;
+left:0;
+width:100%;
+height:100%;
+background:white;
+display:flex;
+flex-direction:column;
+justify-content:center;
+align-items:center;
 }
 
-.search{
-width:100%;
+.graph{
+margin-top:20px;
+background:white;
 padding:10px;
 border-radius:10px;
-border:1px solid #ccc;
-margin-bottom:10px;
 }
 
 </style>
+
 </head>
 
 <body>
 
-<header>📔 神日記 Ultimate</header>
+<div id="lock" class="lock">
+
+<h2>🔒 パスコード</h2>
+
+<input id="pass" type="password">
+
+<button onclick="unlock()">開く</button>
+
+</div>
+
+<header>📔 神日記 Ultimate Pro</header>
 
 <div class="container">
-
-<input id="search" class="search" placeholder="🔍 日記検索">
 
 <h3>😊 気分</h3>
 
 <select id="mood">
+
 <option>😀</option>
 <option>😍</option>
 <option>😊</option>
@@ -125,56 +138,58 @@ margin-bottom:10px;
 <option>😢</option>
 <option>😡</option>
 <option>😴</option>
+
 </select>
 
 <textarea id="text" placeholder="今日の出来事"></textarea>
 
-<input type="file" id="media" multiple accept="image/*,video/*">
+<input type="file" id="media" multiple accept="image/*">
 
 <button onclick="saveDiary()">保存</button>
 
-<button onclick="getLocation()">📍位置情報</button>
-
 <button onclick="backup()">☁️バックアップ</button>
 
-<div class="calendarHeader">
-
-<button onclick="prevMonth()">←</button>
-
-<h3 id="monthLabel"></h3>
-
-<button onclick="nextMonth()">→</button>
-
-</div>
+<h3>📅 カレンダー</h3>
 
 <div id="calendar" class="calendar"></div>
 
-<h3>📚 日記</h3>
-
 <div id="diary"></div>
+
+<div class="graph">
+
+<h3>📊 気分グラフ</h3>
+
+<canvas id="moodChart"></canvas>
 
 </div>
 
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
 <script>
 
-let current=new Date();
-let locationText="";
+if(!localStorage.pass){
 
-function getLocation(){
+let p=prompt("パスコード設定");
 
-navigator.geolocation.getCurrentPosition(p=>{
+localStorage.pass=p;
 
-locationText="📍"+p.coords.latitude.toFixed(3)+","+p.coords.longitude.toFixed(3);
+}
 
-alert("位置を保存しました");
+function unlock(){
 
-});
+if(document.getElementById("pass").value===localStorage.pass){
+
+document.getElementById("lock").style.display="none";
+
+}
 
 }
 
 function saveDiary(){
 
-let text=document.getElementById("text").value+" "+locationText;
+let text=document.getElementById("text").value;
 
 let mood=document.getElementById("mood").value;
 
@@ -187,17 +202,18 @@ let loaded=0;
 if(files.length===0){
 
 store(text,mood,media);
+
 return;
 
 }
 
 for(let f of files){
 
-let reader=new FileReader();
+let r=new FileReader();
 
-reader.onload=e=>{
+r.onload=e=>{
 
-media.push({type:f.type,data:e.target.result});
+media.push(e.target.result);
 
 loaded++;
 
@@ -207,9 +223,9 @@ store(text,mood,media);
 
 }
 
-};
+}
 
-reader.readAsDataURL(f);
+r.readAsDataURL(f);
 
 }
 
@@ -217,7 +233,7 @@ reader.readAsDataURL(f);
 
 function store(text,mood,media){
 
-let diary=JSON.parse(localStorage.getItem("diary")||"[]");
+let diary=JSON.parse(localStorage.diary||"[]");
 
 let d=new Date();
 
@@ -239,27 +255,25 @@ media:media
 
 });
 
-localStorage.setItem("diary",JSON.stringify(diary));
-
-document.getElementById("text").value="";
-document.getElementById("media").value="";
+localStorage.diary=JSON.stringify(diary);
 
 loadDiary();
+
 buildCalendar();
+
+buildGraph();
 
 }
 
-function loadDiary(){
+function loadDiary(day=null){
 
-let diary=JSON.parse(localStorage.getItem("diary")||"[]");
-
-let key=document.getElementById("search").value;
+let diary=JSON.parse(localStorage.diary||"[]");
 
 let html="";
 
 diary.forEach(e=>{
 
-if(key && !e.text.includes(key)) return;
+if(day && e.day!==day) return;
 
 html+=`
 
@@ -271,11 +285,7 @@ html+=`
 
 <div class="media">
 
-${e.media.map(m=>m.type.includes("video")
-
-?`<video controls src="${m.data}"></video>`
-
-:`<img src="${m.data}">`).join("")}
+${e.media.map(m=>`<img src="${m}" onclick="viewImage('${m}')">`).join("")}
 
 </div>
 
@@ -289,43 +299,27 @@ document.getElementById("diary").innerHTML=html;
 
 }
 
-document.getElementById("search").oninput=loadDiary;
-
 function buildCalendar(){
 
-let diary=JSON.parse(localStorage.getItem("diary")||"[]");
+let diary=JSON.parse(localStorage.diary||"[]");
 
-let y=current.getFullYear();
-let m=current.getMonth();
+let today=new Date();
 
-document.getElementById("monthLabel").innerText=y+"年"+(m+1)+"月";
+let y=today.getFullYear();
 
-let first=new Date(y,m,1).getDay();
+let m=today.getMonth();
+
 let last=new Date(y,m+1,0).getDate();
 
 let html="";
-
-for(let i=0;i<first;i++) html+="<div></div>";
 
 for(let d=1;d<=last;d++){
 
 let cls="day";
 
-if(diary.some(e=>e.year===y && e.month===m && e.day===d)){
+if(diary.some(e=>e.day===d)) cls+=" hasDiary";
 
-cls+=" hasDiary";
-
-}
-
-let today=new Date();
-
-if(d===today.getDate() && m===today.getMonth() && y===today.getFullYear()){
-
-cls+=" today";
-
-}
-
-html+=`<div class="${cls}">${d}</div>`;
+html+=`<div class="${cls}" onclick="loadDiary(${d})">${d}</div>`;
 
 }
 
@@ -333,25 +327,51 @@ document.getElementById("calendar").innerHTML=html;
 
 }
 
-function prevMonth(){
+function viewImage(src){
 
-current.setMonth(current.getMonth()-1);
+let w=window.open("");
 
-buildCalendar();
+w.document.write(`<img src="${src}" style="width:100%">`);
 
 }
 
-function nextMonth(){
+function buildGraph(){
 
-current.setMonth(current.getMonth()+1);
+let diary=JSON.parse(localStorage.diary||"[]");
 
-buildCalendar();
+let moods={};
+
+diary.forEach(d=>{
+
+moods[d.mood]=(moods[d.mood]||0)+1;
+
+});
+
+let ctx=document.getElementById("moodChart");
+
+new Chart(ctx,{
+
+type:"bar",
+
+data:{
+
+labels:Object.keys(moods),
+
+datasets:[{
+
+data:Object.values(moods)
+
+}]
+
+}
+
+});
 
 }
 
 function backup(){
 
-let data=localStorage.getItem("diary")||"[]";
+let data=localStorage.diary||"[]";
 
 let blob=new Blob([data],{type:"application/json"});
 
@@ -365,10 +385,20 @@ a.click();
 
 }
 
+if("serviceWorker" in navigator){
+
+navigator.serviceWorker.register("sw.js");
+
+}
+
 loadDiary();
+
 buildCalendar();
+
+buildGraph();
 
 </script>
 
 </body>
+
 </html>

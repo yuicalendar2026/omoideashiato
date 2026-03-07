@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>神フォト日記</title>
+<title>神日記 Pro</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 
 <style>
@@ -10,11 +10,11 @@
 body{
 font-family:-apple-system;
 margin:0;
-background:#f4f6f8;
+background:#f2f4f8;
 }
 
 header{
-background:#4A90E2;
+background:#111;
 color:white;
 padding:15px;
 text-align:center;
@@ -23,66 +23,64 @@ font-size:20px;
 
 .container{
 padding:15px;
-max-width:700px;
+max-width:800px;
 margin:auto;
 }
 
 textarea{
 width:100%;
-height:100px;
+height:90px;
 border-radius:10px;
-border:1px solid #ccc;
 padding:10px;
+border:1px solid #ccc;
 }
 
 button{
+margin-top:8px;
 padding:12px;
 border:none;
 border-radius:10px;
-background:#4A90E2;
+background:#007aff;
 color:white;
-margin-top:10px;
 width:100%;
 }
 
 .entry{
 background:white;
-padding:12px;
 margin-top:12px;
-border-radius:10px;
+padding:12px;
+border-radius:12px;
 }
 
-.images{
-display:flex;
-flex-wrap:wrap;
+.grid{
+display:grid;
+grid-template-columns:repeat(3,1fr);
 gap:6px;
 margin-top:8px;
 }
 
-.images img{
-width:90px;
-height:90px;
-object-fit:cover;
+.grid img,.grid video{
+width:100%;
 border-radius:8px;
-}
-
-.mood{
-font-size:24px;
 }
 
 .calendar{
 display:grid;
 grid-template-columns:repeat(7,1fr);
-gap:5px;
-margin-top:15px;
+gap:4px;
+margin-top:10px;
 }
 
 .day{
 background:white;
 padding:8px;
+text-align:center;
 border-radius:6px;
 font-size:12px;
-text-align:center;
+}
+
+.hasDiary{
+background:#ffe082;
 }
 
 .search{
@@ -101,8 +99,8 @@ height:100%;
 background:white;
 display:flex;
 flex-direction:column;
-align-items:center;
 justify-content:center;
+align-items:center;
 }
 
 </style>
@@ -110,17 +108,17 @@ justify-content:center;
 
 <body>
 
-<div id="lockScreen" class="lock">
+<div id="lock" class="lock">
 <h2>🔒 パスコード</h2>
-<input id="passInput" type="password">
+<input type="password" id="pass">
 <button onclick="unlock()">開く</button>
 </div>
 
-<header>📔 神フォト日記</header>
+<header>📔 神日記 Pro</header>
 
 <div class="container">
 
-<input class="search" id="search" placeholder="🔍 日記検索">
+<input id="search" class="search" placeholder="🔍 日記検索">
 
 <h3>😊 気分</h3>
 
@@ -133,13 +131,17 @@ justify-content:center;
 <option>😴</option>
 </select>
 
-<textarea id="text" placeholder="今日の日記"></textarea>
+<textarea id="text" placeholder="今日の出来事"></textarea>
 
-<input type="file" id="photos" multiple accept="image/*">
+<input type="file" id="photos" multiple accept="image/*,video/*">
+
+<button onclick="recordVoice()">🎙 音声メモ</button>
+
+<button onclick="getLocation()">📍 位置情報</button>
 
 <button onclick="saveDiary()">保存</button>
 
-<button onclick="exportData()">☁️ バックアップ</button>
+<button onclick="backup()">☁️バックアップ</button>
 
 <h3>📅 カレンダー</h3>
 <div id="calendar" class="calendar"></div>
@@ -153,73 +155,112 @@ justify-content:center;
 
 if(!localStorage.pass){
 
-let p=prompt("初回パスコード設定");
+let p=prompt("パスコード設定");
 localStorage.pass=p;
 
 }
 
 function unlock(){
 
-let v=document.getElementById("passInput").value;
+if(document.getElementById("pass").value===localStorage.pass){
 
-if(v===localStorage.pass){
-
-document.getElementById("lockScreen").style.display="none";
+document.getElementById("lock").style.display="none";
 
 }
+
+}
+
+let locationText="";
+
+function getLocation(){
+
+navigator.geolocation.getCurrentPosition(pos=>{
+
+locationText=`📍${pos.coords.latitude.toFixed(3)},${pos.coords.longitude.toFixed(3)}`;
+
+alert("位置保存しました");
+
+});
+
+}
+
+let voiceText="";
+
+function recordVoice(){
+
+const rec=new webkitSpeechRecognition();
+
+rec.lang="ja-JP";
+
+rec.onresult=e=>{
+
+voiceText=e.results[0][0].transcript;
+
+alert("音声保存");
+
+};
+
+rec.start();
 
 }
 
 function saveDiary(){
 
-const text=document.getElementById("text").value;
-const mood=document.getElementById("mood").value;
-const files=document.getElementById("photos").files;
+let text=document.getElementById("text").value+" "+voiceText+" "+locationText;
 
-let images=[];
+let mood=document.getElementById("mood").value;
+
+let files=document.getElementById("photos").files;
+
+let media=[];
+
 let loaded=0;
 
 if(files.length===0){
 
-store(text,mood,images);
+store(text,mood,media);
+
 return;
 
 }
 
-for(let file of files){
+for(let f of files){
 
 let reader=new FileReader();
 
 reader.onload=e=>{
 
-images.push(e.target.result);
+media.push({type:f.type,data:e.target.result});
+
 loaded++;
 
 if(loaded===files.length){
 
-store(text,mood,images);
+store(text,mood,media);
 
 }
 
 };
 
-reader.readAsDataURL(file);
+reader.readAsDataURL(f);
 
 }
 
 }
 
-function store(text,mood,images){
+function store(text,mood,media){
 
 let diary=JSON.parse(localStorage.diary||"[]");
+
+let day=new Date().getDate();
 
 diary.unshift({
 
 date:new Date().toLocaleString(),
-day:new Date().getDate(),
+day:day,
 text:text,
 mood:mood,
-images:images
+media:media
 
 });
 
@@ -234,23 +275,39 @@ function loadDiary(){
 
 let diary=JSON.parse(localStorage.diary||"[]");
 
-let keyword=document.getElementById("search").value;
+let key=document.getElementById("search").value;
 
 let html="";
 
-diary.forEach(e=>{
+diary.forEach((e,i)=>{
 
-if(keyword && !e.text.includes(keyword)) return;
+if(key && !e.text.includes(key))return;
 
-html+=`
-<div class="entry">
-<div>${e.date} <span class="mood">${e.mood}</span></div>
+html+=`<div class="entry">
+
+<div>${e.date} ${e.mood}</div>
+
 <div>${e.text}</div>
-<div class="images">
-${e.images.map(i=>`<img src="${i}">`).join("")}
+
+<div class="grid">
+
+${e.media.map(m=>{
+
+if(m.type.includes("video"))
+
+return `<video controls src="${m.data}"></video>`;
+
+else
+
+return `<img src="${m.data}">`;
+
+}).join("")}
+
 </div>
-</div>
-`;
+
+<button onclick="deleteDiary(${i})">削除</button>
+
+</div>`;
 
 });
 
@@ -258,23 +315,42 @@ document.getElementById("diary").innerHTML=html;
 
 }
 
+function deleteDiary(i){
+
+let diary=JSON.parse(localStorage.diary||"[]");
+
+diary.splice(i,1);
+
+localStorage.diary=JSON.stringify(diary);
+
+loadDiary();
+buildCalendar();
+
+}
+
 document.getElementById("search").oninput=loadDiary;
 
 function buildCalendar(){
 
-let cal="";
+let diary=JSON.parse(localStorage.diary||"[]");
+
+let days=diary.map(d=>d.day);
+
+let html="";
 
 for(let i=1;i<=31;i++){
 
-cal+=`<div class="day">${i}</div>`;
+let cls=days.includes(i)?"day hasDiary":"day";
+
+html+=`<div class="${cls}">${i}</div>`;
 
 }
 
-document.getElementById("calendar").innerHTML=cal;
+document.getElementById("calendar").innerHTML=html;
 
 }
 
-function exportData(){
+function backup(){
 
 let data=localStorage.diary;
 

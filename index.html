@@ -1,404 +1,1001 @@
-<!DOCTYPE html>
-<html lang="ja">
-<head>
+import { useState, useRef, useCallback } from “react”;
 
-<meta charset="UTF-8">
-<title>神日記 Ultimate Pro</title>
+const MONTHS = [“1月”,“2月”,“3月”,“4月”,“5月”,“6月”,“7月”,“8月”,“9月”,“10月”,“11月”,“12月”];
+const DAYS = [“日”,“月”,“火”,“水”,“木”,“金”,“土”];
+const WEATHERS = [
+{ emoji: “☀️”, label: “晴れ” },
+{ emoji: “⛅”, label: “曇り” },
+{ emoji: “🌂”, label: “雨” },
+{ emoji: “❄️”, label: “雪” },
+{ emoji: “🌈”, label: “虹” },
+];
 
-<meta name="viewport" content="width=device-width,initial-scale=1">
+// ── 吉方位（九星気学）────────────────────────────────────
+function getYearKyusei(year) { return ((11-(year-1984)%9)%9)+1; }
+function getMonthKyusei(year, month) {
+const y = getYearKyusei(year);
+const mo = [2,1,9,8,7,6,5,4,3,2,1,9][month];
+return ((y+mo-2)%9)+1;
+}
+const KYUSEI_LUCKY = {
+1:[“北”,“南西”],2:[“南西”,“東北”],3:[“東”,“南東”],
+4:[“南東”,“東”],5:[“北”,“南”],6:[“西北”,“西”],
+7:[“西”,“西北”],8:[“東北”,“南西”],9:[“南”,“東南”],
+};
+const KYUSEI_NAME = {1:“一白水星”,2:“二黒土星”,3:“三碧木星”,4:“四緑木星”,
+5:“五黄土星”,6:“六白金星”,7:“七赤金星”,8:“八白土星”,9:“九紫火星”};
+const KYUSEI_COLOR = {1:”#4a90d9”,2:”#b8860b”,3:”#3a9a5c”,4:”#3a9a5c”,
+5:”#cc8800”,6:”#aaaaaa”,7:”#cc3333”,8:”#b8860b”,9:”#cc3333”};
+const DIR_ANGLE = {
+“北”:270,“東北”:315,“東”:0,“南東”:45,“南”:90,“南西”:135,“西”:180,“西北”:225
+};
 
-<link rel="manifest" href="manifest.json">
+// ── 六曜 ─────────────────────────────────────────────────
+// 旧暦月日の合計 mod 6 で計算（簡易版：グレゴリオ暦→旧暦変換）
+const ROKUYO = [“大安”,“赤口”,“先勝”,“友引”,“先負”,“仏滅”];
+const ROKUYO_COLOR = {
+“大安”: “#e8734a”, // 橙赤（最吉）
+“赤口”: “#cc4444”, // 赤
+“先勝”: “#4a90d9”, // 青
+“友引”: “#5daa6e”, // 緑
+“先負”: “#8a7cb8”, // 紫
+“仏滅”: “#999”,    // グレー
+};
+const ROKUYO_LABEL = {
+“大安”: “✦ 大安”, “赤口”: “赤口”, “先勝”: “先勝”, “友引”: “友引”, “先負”: “先負”, “仏滅”: “仏滅”
+};
 
-<style>
-
-body{
-font-family:-apple-system;
-margin:0;
-background:#f4f6fb;
+// 旧暦変換（寿星万年暦アルゴリズム簡易版）
+function solarToLunar(year, month, day) {
+// 天文補正値テーブル（1900〜2100年対応の簡易近似）
+const lunarNewMoons = getLunarNewMoons(year);
+const jd = toJD(year, month, day);
+let lunarMonth = 1;
+let lunarDay = 1;
+for (let i = 0; i < lunarNewMoons.length - 1; i++) {
+if (jd >= lunarNewMoons[i] && jd < lunarNewMoons[i + 1]) {
+lunarMonth = (i % 12) + 1;
+lunarDay = Math.floor(jd - lunarNewMoons[i]) + 1;
+break;
+}
+}
+return { month: lunarMonth, day: lunarDay };
 }
 
-header{
-background:#000;
-color:white;
-padding:15px;
-text-align:center;
-font-size:20px;
+function toJD(y, m, d) {
+// ユリウス日数（簡易計算）
+const a = Math.floor((14 - m) / 12);
+const yr = y + 4800 - a;
+const mo = m + 12 * a - 3;
+return d + Math.floor((153 * mo + 2) / 5) + 365 * yr + Math.floor(yr / 4)
+- Math.floor(yr / 100) + Math.floor(yr / 400) - 32045;
 }
 
-.container{
-padding:15px;
-max-width:800px;
-margin:auto;
+function getLunarNewMoons(year) {
+// 朔の日時をユリウス日で概算（メトン周期ベース）
+const moons = [];
+const k0 = Math.round((year - 2000) * 12.3685);
+for (let k = k0 - 14; k <= k0 + 14; k++) {
+const T = k / 1236.85;
+let JDE = 2451550.09766 + 29.530588861 * k
++ 0.00015437 * T * T - 0.000000150 * T * T * T
++ 0.00000000073 * T * T * T * T;
+// 補正（簡易）
+const M = (2.5534 + 29.10535670 * k) * Math.PI / 180;
+const Mprime = (201.5643 + 385.81693528 * k) * Math.PI / 180;
+const F = (160.7108 + 390.67050284 * k) * Math.PI / 180;
+JDE += -0.40720 * Math.sin(Mprime) + 0.17241 * Math.sin(M)
++ 0.01608 * Math.sin(2 * Mprime) + 0.01039 * Math.sin(2 * F)
++ 0.00739 * Math.sin(Mprime - M) - 0.00514 * Math.sin(Mprime + M);
+moons.push(Math.round(JDE - 0.5)); // 日本時間補正（+9h≈0.375日）
+}
+return moons.sort((a, b) => a - b);
 }
 
-textarea{
-width:100%;
-height:90px;
-border-radius:10px;
-padding:10px;
-border:1px solid #ccc;
+function getRokuyo(year, month, day) {
+try {
+const lunar = solarToLunar(year, month, day);
+const idx = (lunar.month + lunar.day - 2) % 6;
+return ROKUYO[(idx + 6) % 6];
+} catch {
+return ROKUYO[0];
+}
 }
 
-button{
-width:100%;
-padding:12px;
-margin-top:8px;
-border:none;
-border-radius:10px;
-background:#007aff;
-color:white;
+// ── 十二支・十干 ──────────────────────────────────────────
+const JUNISHI = [“子”,“丑”,“寅”,“卯”,“辰”,“巳”,“午”,“未”,“申”,“酉”,“戌”,“亥”];
+const JUNISHI_EMOJI = [“🐭”,“🐮”,“🐯”,“🐰”,“🐲”,“🐍”,“🐴”,“🐑”,“🐵”,“🐓”,“🐶”,“🐷”];
+const JIKKAN = [“甲”,“乙”,“丙”,“丁”,“戊”,“己”,“庚”,“辛”,“壬”,“癸”];
+
+// 年の十二支（1984年=子年 基準）
+function getYearJunishi(year) {
+return (year - 1984 + 120) % 12;
 }
 
-.entry{
-background:white;
-padding:12px;
-margin-top:10px;
-border-radius:12px;
+// 日の干支インデックス（ユリウス日基準）
+// JD=0 は甲戌(10) → 干:0=甲, 支:10=戌
+function getDayKanshi(year, month, day) {
+const jd = toJD(year, month, day);
+const kan = ((jd % 10) + 10) % 10;   // 十干 0=甲
+const shi = ((jd % 12) + 12) % 12;   // 十二支 0=子
+return { kan, shi };
+}
+function getDayJunishi(year, month, day) {
+return getDayKanshi(year, month, day).shi;
 }
 
-.media{
-display:grid;
-grid-template-columns:repeat(3,1fr);
-gap:6px;
-margin-top:8px;
+// ── 一粒万倍日 ────────────────────────────────────────────
+// 月ごとの十二支：その月の「種まき」に吉とされる支
+// 旧暦月に対応する十二支（農事暦に基づく伝統的な対応）
+const ICHIRYUMAN_SHISHI = {
+1: [0, 6],   // 子・午
+2: [3, 9],   // 卯・酉
+3: [0, 6],   // 子・午
+4: [3, 9],   // 卯・酉
+5: [2, 8],   // 寅・申
+6: [5, 11],  // 巳・亥
+7: [2, 8],   // 寅・申
+8: [5, 11],  // 巳・亥
+9: [0, 6],   // 子・午
+10: [3, 9],  // 卯・酉
+11: [0, 6],  // 子・午
+12: [3, 9],  // 卯・酉
+};
+
+function isIchiryumanbai(year, month, day) {
+try {
+const lunar = solarToLunar(year, month, day);
+const lm = lunar.month;
+const { shi } = getDayKanshi(year, month, day);
+const targets = ICHIRYUMAN_SHISHI[lm] || [];
+return targets.includes(shi);
+} catch { return false; }
 }
 
-.media img{
-width:100%;
-border-radius:8px;
-cursor:pointer;
+// ── 天赦日 ────────────────────────────────────────────────
+// 季節（旧暦月）と干支の組み合わせで決まる
+// 春(1〜3月)=戊寅, 夏(4〜6月)=甲午, 秋(7〜9月)=戊申, 冬(10〜12月)=甲子
+// 干支の組み合わせ：干(0=甲,4=戊) × 支(2=寅,6=午,8=申,0=子)
+const TENSHADAY_MAP = {
+1: { kan: 4, shi: 2 },  // 春: 戊寅
+2: { kan: 4, shi: 2 },
+3: { kan: 4, shi: 2 },
+4: { kan: 0, shi: 6 },  // 夏: 甲午
+5: { kan: 0, shi: 6 },
+6: { kan: 0, shi: 6 },
+7: { kan: 4, shi: 8 },  // 秋: 戊申
+8: { kan: 4, shi: 8 },
+9: { kan: 4, shi: 8 },
+10: { kan: 0, shi: 0 }, // 冬: 甲子
+11: { kan: 0, shi: 0 },
+12: { kan: 0, shi: 0 },
+};
+
+function isTenshaDay(year, month, day) {
+try {
+const lunar = solarToLunar(year, month, day);
+const lm = lunar.month;
+const target = TENSHADAY_MAP[lm];
+if (!target) return false;
+const { kan, shi } = getDayKanshi(year, month, day);
+return kan === target.kan && shi === target.shi;
+} catch { return false; }
 }
 
-.calendar{
-display:grid;
-grid-template-columns:repeat(7,1fr);
-gap:5px;
-margin-top:10px;
+// ── 開運日まとめ ──────────────────────────────────────────
+function getLuckyDay(year, month, day) {
+const { shi } = getDayKanshi(year, month, day);
+const rokuyo = getRokuyo(year, month, day);
+const lucky = [];
+
+// 天赦日（年に5〜6日の最強開運日）
+if (isTenshaDay(year, month, day))
+lucky.push({ name: “天赦日”, color: “#c0392b”, emoji: “☀️”, rank: 4 });
+
+// 大安（六曜の最吉日）
+if (rokuyo === “大安”)
+lucky.push({ name: “大安”, color: “#e8734a”, emoji: “✦”, rank: 3 });
+
+// 一粒万倍日
+if (isIchiryumanbai(year, month, day))
+lucky.push({ name: “一粒万倍日”, color: “#d4820a”, emoji: “🌾”, rank: 2 });
+
+// 寅の日（十二支=寅=2）
+if (shi === 2)
+lucky.push({ name: “寅の日”, color: “#7b5ea7”, emoji: “🐯”, rank: 1 });
+
+// 巳の日（十二支=巳=5）
+if (shi === 5)
+lucky.push({ name: “巳の日”, color: “#5daa6e”, emoji: “🐍”, rank: 1 });
+
+return lucky;
 }
 
-.day{
-background:white;
-padding:10px;
-border-radius:8px;
-text-align:center;
-}
+function getDaysInMonth(y, m) { return new Date(y, m + 1, 0).getDate(); }
+function getFirstDay(y, m) { return new Date(y, m, 1).getDay(); }
 
-.hasDiary{
-background:#ffe082;
-}
+const today = new Date();
 
-.lock{
-position:fixed;
-top:0;
-left:0;
-width:100%;
-height:100%;
-background:white;
-display:flex;
-flex-direction:column;
-justify-content:center;
-align-items:center;
-}
-
-.graph{
-margin-top:20px;
-background:white;
-padding:10px;
-border-radius:10px;
-}
-
-</style>
-
-</head>
-
-<body>
-
-<div id="lock" class="lock">
-
-<h2>🔒 パスコード</h2>
-
-<input id="pass" type="password">
-
-<button onclick="unlock()">開く</button>
-
+// ── Lightbox ──────────────────────────────────────────────
+function Lightbox({ photos, index, onClose }) {
+const [cur, setCur] = useState(index);
+const prev = (e) => { e.stopPropagation(); setCur(c => (c - 1 + photos.length) % photos.length); };
+const next = (e) => { e.stopPropagation(); setCur(c => (c + 1) % photos.length); };
+return (
+<div onClick={onClose} style={{
+position: “fixed”, inset: 0, zIndex: 1000,
+background: “rgba(20,20,30,0.92)”,
+display: “flex”, alignItems: “center”, justifyContent: “center”,
+animation: “fadeIn 0.2s ease”,
+}}>
+<button onClick={onClose} style={{
+position: “absolute”, top: “16px”, right: “20px”,
+background: “none”, border: “none”, color: “white”,
+fontSize: “28px”, cursor: “pointer”, zIndex: 10,
+}}>✕</button>
+{photos.length > 1 && <>
+<button onClick={prev} style={{
+position: “absolute”, left: “12px”, background: “rgba(255,255,255,0.15)”,
+border: “none”, color: “white”, fontSize: “24px”, borderRadius: “50%”,
+width: “44px”, height: “44px”, cursor: “pointer”,
+display: “flex”, alignItems: “center”, justifyContent: “center”, zIndex: 10,
+}}>‹</button>
+<button onClick={next} style={{
+position: “absolute”, right: “12px”, background: “rgba(255,255,255,0.15)”,
+border: “none”, color: “white”, fontSize: “24px”, borderRadius: “50%”,
+width: “44px”, height: “44px”, cursor: “pointer”,
+display: “flex”, alignItems: “center”, justifyContent: “center”, zIndex: 10,
+}}>›</button>
+</>}
+<img src={photos[cur]} alt=”” onClick={e => e.stopPropagation()} style={{
+maxWidth: “92vw”, maxHeight: “88vh”,
+borderRadius: “14px”, objectFit: “contain”,
+boxShadow: “0 8px 48px rgba(0,0,0,0.6)”,
+}} />
+{photos.length > 1 && (
+<div style={{ position: “absolute”, bottom: “20px”, display: “flex”, gap: “6px” }}>
+{photos.map((_, i) => (
+<div key={i} onClick={e => { e.stopPropagation(); setCur(i); }} style={{
+width: i === cur ? “20px” : “6px”, height: “6px”, borderRadius: “3px”,
+background: i === cur ? “#f9c85a” : “rgba(255,255,255,0.35)”,
+transition: “all 0.3s”, cursor: “pointer”,
+}} />
+))}
 </div>
-
-<header>📔 神日記 Ultimate Pro</header>
-
-<div class="container">
-
-<h3>😊 気分</h3>
-
-<select id="mood">
-
-<option>😀</option>
-<option>😍</option>
-<option>😊</option>
-<option>😐</option>
-<option>😢</option>
-<option>😡</option>
-<option>😴</option>
-
-</select>
-
-<textarea id="text" placeholder="今日の出来事"></textarea>
-
-<input type="file" id="media" multiple accept="image/*">
-
-<button onclick="saveDiary()">保存</button>
-
-<button onclick="backup()">☁️バックアップ</button>
-
-<h3>📅 カレンダー</h3>
-
-<div id="calendar" class="calendar"></div>
-
-<div id="diary"></div>
-
-<div class="graph">
-
-<h3>📊 気分グラフ</h3>
-
-<canvas id="moodChart"></canvas>
-
+)}
 </div>
+);
+}
 
+// ── 吉方位コンパス ────────────────────────────────────────
+function LuckyCompass({ year, month }) {
+const yk = getYearKyusei(year);
+const mk = getMonthKyusei(year, month);
+const luckyDirs = KYUSEI_LUCKY[mk] || [];
+const size = 160;
+const cx = size / 2, cy = size / 2, r = 60;
+
+const dirLabels = [
+{ label:“北”, angle:270 },{ label:“東北”, angle:315 },
+{ label:“東”, angle:0 },{ label:“南東”, angle:45 },
+{ label:“南”, angle:90 },{ label:“南西”, angle:135 },
+{ label:“西”, angle:180 },{ label:“西北”, angle:225 },
+];
+
+return (
+<div style={{
+background: “rgba(8,35,16,0.75)”, backdropFilter:“blur(16px)”, WebkitBackdropFilter:“blur(16px)”,
+borderRadius: “14px”,
+padding: “13px 14px”, marginBottom: “10px”,
+boxShadow: “0 4px 20px rgba(0,0,0,0.25), 0 1px 0 rgba(255,220,120,0.15) inset”,
+border: “1px solid rgba(255,200,100,0.2)”,
+}}>
+<div style={{ fontSize: “11px”, color: “#a08060”, letterSpacing: “1px”, marginBottom: “10px” }}>
+吉方位コンパス
 </div>
-
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
-<script>
-
-if(!localStorage.pass){
-
-let p=prompt("パスコード設定");
-
-localStorage.pass=p;
-
+<div style={{ display: “flex”, alignItems: “center”, gap: “16px” }}>
+{/* SVGコンパス */}
+<svg width={size} height={size} style={{ flexShrink: 0 }}>
+{/* 外円 */}
+<circle cx={cx} cy={cy} r={r+14} fill="rgba(255,240,200,0.08)" stroke="rgba(255,210,100,0.3)" strokeWidth="1.5"/>
+<circle cx={cx} cy={cy} r={r} fill="rgba(255,220,150,0.06)" stroke="rgba(255,200,80,0.25)" strokeWidth="1"/>
+{/* 吉方位の扇形ハイライト */}
+{luckyDirs.map((dir, i) => {
+const a = (DIR_ANGLE[dir] - 22.5) * Math.PI / 180;
+const b = (DIR_ANGLE[dir] + 22.5) * Math.PI / 180;
+const x1 = cx + r * Math.cos(a), y1 = cy + r * Math.sin(a);
+const x2 = cx + r * Math.cos(b), y2 = cy + r * Math.sin(b);
+return (
+<path key={dir}
+d={`M${cx},${cy} L${x1},${y1} A${r},${r} 0 0,1 ${x2},${y2} Z`}
+fill={i===0 ? “rgba(255,160,60,0.35)” : “rgba(255,200,100,0.25)”}
+stroke={i===0 ? “#ff9a00” : “#ffc840”}
+strokeWidth=“1”
+/>
+);
+})}
+{/* 方位ラベル */}
+{dirLabels.map(({ label, angle }) => {
+const rad = angle * Math.PI / 180;
+const lx = cx + (r + 22) * Math.cos(rad);
+const ly = cy + (r + 22) * Math.sin(rad);
+const isLucky = luckyDirs.includes(label);
+return (
+<text key={label} x={lx} y={ly}
+textAnchor=“middle” dominantBaseline=“middle”
+fontSize={isLucky ? “10” : “8”}
+fontWeight={isLucky ? “700” : “400”}
+fill={isLucky ? “#ffb347” : “rgba(255,200,140,0.6)”}
+>{label}</text>
+);
+})}
+{/* 中心点 */}
+<circle cx={cx} cy={cy} r="4" fill="#ff9a00"/>
+<circle cx={cx} cy={cy} r="2" fill="white"/>
+{/* 北指示 */}
+<line x1={cx} y1={cy-r+8} x2={cx} y2={cy-14}
+stroke="#e05050" strokeWidth="2" strokeLinecap="round"/>
+<polygon
+points={`${cx},${cy-r+2} ${cx-4},${cy-r+12} ${cx+4},${cy-r+12}`}
+fill=”#e05050”
+/>
+</svg>
+{/* 説明テキスト */}
+<div style={{ flex: 1 }}>
+<div style={{ fontSize: “10px”, color: “rgba(160,220,180,0.75)”, marginBottom: “6px” }}>
+今月の九星
+</div>
+<div style={{
+fontSize: “13px”, fontWeight: 600,
+color: “rgba(212,175,55,0.95)”, marginBottom: “8px”,
+}}>{KYUSEI_NAME[mk]}</div>
+<div style={{ fontSize: “10px”, color: “rgba(160,220,180,0.75)”, marginBottom: “4px” }}>
+今月の吉方位
+</div>
+{luckyDirs.map((dir, i) => (
+<div key={dir} style={{
+display: “inline-flex”, alignItems: “center”, gap: “4px”,
+marginRight: “8px”, marginBottom: “4px”,
+padding: “3px 10px”, borderRadius: “20px”,
+background: i===0 ? “rgba(30,120,55,0.6)” : “rgba(15,60,30,0.5)”,
+border: `1px solid ${i===0 ? "rgba(212,175,55,0.7)" : "rgba(212,175,55,0.35)"}`,
+fontSize: “12px”, fontWeight: 600,
+color: i===0 ? “rgba(212,175,55,0.95)” : “rgba(160,220,180,0.8)”,
+}}>
+{i===0 ? “✦” : “◇”} {dir}
+</div>
+))}
+<div style={{ fontSize: “9px”, color: “rgba(120,180,140,0.5)”, marginTop: “6px”, lineHeight: 1.5 }}>
+年盤：{KYUSEI_NAME[yk]}
+</div>
+</div>
+</div>
+</div>
+);
 }
 
-function unlock(){
-
-if(document.getElementById("pass").value===localStorage.pass){
-
-document.getElementById("lock").style.display="none";
-
-}
-
-}
-
-function saveDiary(){
-
-let text=document.getElementById("text").value;
-
-let mood=document.getElementById("mood").value;
-
-let files=document.getElementById("media").files;
-
-let media=[];
-
-let loaded=0;
-
-if(files.length===0){
-
-store(text,mood,media);
-
-return;
-
-}
-
-for(let f of files){
-
-let r=new FileReader();
-
-r.onload=e=>{
-
-media.push(e.target.result);
-
-loaded++;
-
-if(loaded===files.length){
-
-store(text,mood,media);
-
-}
-
-}
-
-r.readAsDataURL(f);
-
-}
-
-}
-
-function store(text,mood,media){
-
-let diary=JSON.parse(localStorage.diary||"[]");
-
-let d=new Date();
-
-diary.unshift({
-
-date:d.toLocaleString(),
-
-year:d.getFullYear(),
-
-month:d.getMonth(),
-
-day:d.getDate(),
-
-text:text,
-
-mood:mood,
-
-media:media
-
+// ── Photo Grid ────────────────────────────────────────────
+function PhotoGrid({ photos, onAdd, onRemove, onOpen }) {
+const fileRef = useRef();
+const handleFiles = (e) => {
+Array.from(e.target.files).forEach(file => {
+const reader = new FileReader();
+reader.onload = (ev) => onAdd(ev.target.result);
+reader.readAsDataURL(file);
 });
+e.target.value = “”;
+};
+const showAdd = photos.length < 9;
+const gridCols = photos.length === 0 ? “1fr”
+: photos.length === 1 && showAdd ? “1fr 1fr”
+: photos.length === 1 ? “1fr” : “1fr 1fr”;
 
-localStorage.diary=JSON.stringify(diary);
-
-loadDiary();
-
-buildCalendar();
-
-buildGraph();
-
-}
-
-function loadDiary(day=null){
-
-let diary=JSON.parse(localStorage.diary||"[]");
-
-let html="";
-
-diary.forEach(e=>{
-
-if(day && e.day!==day) return;
-
-html+=`
-
-<div class="entry">
-
-<div>${e.date} ${e.mood}</div>
-
-<div>${e.text}</div>
-
-<div class="media">
-
-${e.media.map(m=>`<img src="${m}" onclick="viewImage('${m}')">`).join("")}
-
+return (
+<div>
+<div style={{ display: “grid”, gridTemplateColumns: gridCols, gap: “6px” }}>
+{photos.map((src, i) => (
+<div key={i} style={{
+position: “relative”, borderRadius: “12px”, overflow: “hidden”,
+aspectRatio: photos.length === 1 && !showAdd ? “4/3” : “1”,
+boxShadow: “0 2px 10px rgba(100,80,60,0.15)”,
+}}>
+<img src={src} alt=”” onClick={() => onOpen(i)}
+style={{ width: “100%”, height: “100%”, objectFit: “cover”, display: “block”, cursor: “pointer” }} />
+<button onClick={e => { e.stopPropagation(); onRemove(i); }} style={{
+position: “absolute”, top: “5px”, right: “5px”,
+width: “24px”, height: “24px”, borderRadius: “50%”,
+background: “rgba(0,0,0,0.5)”, border: “none”, color: “white”,
+fontSize: “12px”, cursor: “pointer”,
+display: “flex”, alignItems: “center”, justifyContent: “center”,
+}}>✕</button>
+{i === 0 && photos.length > 1 && (
+<div style={{
+position: “absolute”, bottom: “5px”, left: “5px”,
+background: “rgba(249,200,90,0.88)”, borderRadius: “6px”,
+padding: “1px 6px”, fontSize: “9px”, color: “#5a3a00”, fontWeight: 700,
+}}>メイン</div>
+)}
 </div>
-
+))}
+{showAdd && (
+<div onClick={() => fileRef.current.click()} style={{
+borderRadius: “12px”,
+background: “rgba(10,50,25,0.5)”,
+border: “2px dashed rgba(212,175,55,0.35)”,
+aspectRatio: photos.length === 0 ? “auto” : “1”,
+minHeight: photos.length === 0 ? “110px” : “auto”,
+display: “flex”, flexDirection: “column”,
+alignItems: “center”, justifyContent: “center”,
+cursor: “pointer”, gap: “5px”,
+}}>
+<span style={{ fontSize: photos.length === 0 ? “26px” : “20px” }}>📷</span>
+<span style={{ fontSize: “11px”, color: “rgba(160,220,180,0.8)” }}>
+{photos.length === 0 ? “写真を追加” : “追加”}
+</span>
 </div>
-
-`;
-
-});
-
-document.getElementById("diary").innerHTML=html;
-
+)}
+</div>
+{photos.length > 0 && (
+<div style={{ display: “flex”, justifyContent: “space-between”, alignItems: “center”, marginTop: “8px” }}>
+<span style={{ fontSize: “11px”, color: “rgba(120,200,150,0.7)” }}>{photos.length}枚</span>
+{showAdd && (
+<button onClick={() => fileRef.current.click()} style={{
+background: “none”, border: “1px solid rgba(212,175,55,0.35)”, borderRadius: “20px”,
+padding: “3px 11px”, fontSize: “11px”, color: “rgba(160,220,180,0.8)”, cursor: “pointer”,
+}}>＋ 写真を追加</button>
+)}
+</div>
+)}
+<input ref={fileRef} type=“file” accept=“image/*” multiple onChange={handleFiles} style={{ display: “none” }} />
+</div>
+);
 }
 
-function buildCalendar(){
+// ── Main App ──────────────────────────────────────────────
+export default function PhotoDiary() {
+const [currentYear, setCurrentYear] = useState(today.getFullYear());
+const [currentMonth, setCurrentMonth] = useState(today.getMonth());
+const [selectedDay, setSelectedDay] = useState(null);
+const [entries, setEntries] = useState({});
+const [view, setView] = useState(“calendar”);
+const [draft, setDraft] = useState({ text: “”, weather: null, photos: [] });
+const [lightbox, setLightbox] = useState(null);
 
-let diary=JSON.parse(localStorage.diary||"[]");
+const key = (y, m, d) => `${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
 
-let today=new Date();
+const openEntry = (day) => {
+const k = key(currentYear, currentMonth, day);
+const existing = entries[k] || { text: “”, weather: null, photos: [] };
+setSelectedDay(day);
+setDraft({ …existing, photos: […(existing.photos || [])] });
+setView(“entry”);
+};
 
-let y=today.getFullYear();
+const saveEntry = () => {
+if (!selectedDay) return;
+const k = key(currentYear, currentMonth, selectedDay);
+setEntries(prev => ({ …prev, [k]: { …draft } }));
+setView(“calendar”);
+};
 
-let m=today.getMonth();
+const addPhoto = useCallback((src) => setDraft(d => ({ …d, photos: […d.photos, src] })), []);
+const removePhoto = useCallback((i) => setDraft(d => ({ …d, photos: d.photos.filter((_, idx) => idx !== i) })), []);
 
-let last=new Date(y,m+1,0).getDate();
+const prevMonth = () => {
+if (currentMonth === 0) { setCurrentYear(y => y - 1); setCurrentMonth(11); }
+else setCurrentMonth(m => m - 1);
+};
+const nextMonth = () => {
+if (currentMonth === 11) { setCurrentYear(y => y + 1); setCurrentMonth(0); }
+else setCurrentMonth(m => m + 1);
+};
 
-let html="";
+const daysInMonth = getDaysInMonth(currentYear, currentMonth);
+const firstDay = getFirstDay(currentYear, currentMonth);
+const cells = Array.from({ length: firstDay + daysInMonth }, (_, i) =>
+i < firstDay ? null : i - firstDay + 1
+);
 
-for(let d=1;d<=last;d++){
+const totalPhotos = Object.values(entries).reduce((s, e) => s + (e.photos?.length || 0), 0);
+const mk = `${currentYear}-${String(currentMonth+1).padStart(2,"0")}`;
+const monthEntries = Object.keys(entries).filter(k => k.startsWith(mk)).length;
+const monthPhotos = Object.entries(entries).filter(([k]) => k.startsWith(mk)).reduce((s, [, e]) => s + (e.photos?.length || 0), 0);
 
-let cls="day";
+const yearJunishiIdx = getYearJunishi(currentYear);
 
-if(diary.some(e=>e.day===d)) cls+=" hasDiary";
+// entry view日付情報
+const entryRokuyo = selectedDay ? getRokuyo(currentYear, currentMonth, selectedDay) : null;
+const entryLucky = selectedDay ? getLuckyDay(currentYear, currentMonth, selectedDay) : [];
 
-html+=`<div class="${cls}" onclick="loadDiary(${d})">${d}</div>`;
+return (
+<div style={{
+minHeight: “100vh”,
+background: “linear-gradient(145deg, #0a1f0e 0%, #0d2a10 20%, #071a0a 40%, #0a1a08 60%, #0f2310 80%, #071508 100%)”,
+fontFamily: “‘Hiragino Mincho ProN’, ‘Yu Mincho’, Georgia, serif”,
+color: “#e8f5e0”,
+position: “relative”,
+overflow: “hidden”,
+}}>
+<style>{`@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@300;400;500&family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300&display=swap'); * { box-sizing: border-box; margin: 0; padding: 0; } .btn { cursor: pointer; border: none; background: none; } .fade-in { animation: fadeIn 0.35s ease forwards; } @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } } .day-cell { transition: all 0.18s ease; } .day-cell:hover { transform: translateY(-2px); box-shadow: 0 6px 24px rgba(80,220,120,0.25), 0 0 0 1px rgba(212,175,55,0.4); } textarea:focus { outline: none; } ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-thumb { background: rgba(212,175,55,0.4); border-radius: 2px; } @keyframes shimmer { 0% { transform: translateX(-200%) skewX(-20deg); } 100% { transform: translateX(600%) skewX(-20deg); } } @keyframes gemPulse1 { 0%,100% { transform: translate(0,0) scale(1); opacity:0.6; } 50% { transform: translate(15px,-25px) scale(1.15); opacity:1; } } @keyframes gemPulse2 { 0%,100% { transform: translate(0,0) scale(1); opacity:0.4; } 50% { transform: translate(-20px,18px) scale(0.88); opacity:0.75; } } @keyframes gemPulse3 { 0%,100% { transform: translate(0,0) scale(1); opacity:0.5; } 33% { transform: translate(12px,20px) scale(1.08); opacity:0.8; } 66% { transform: translate(-8px,-15px) scale(0.94); opacity:0.6; } } @keyframes goldSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } } @keyframes twinkle { 0%,100% { opacity:0.2; transform:scale(0.8); } 50% { opacity:1; transform:scale(1.2); } } .gem1 { animation: gemPulse1 9s ease-in-out infinite; } .gem2 { animation: gemPulse2 13s ease-in-out infinite; } .gem3 { animation: gemPulse3 16s ease-in-out infinite; } .gem4 { animation: gemPulse1 11s ease-in-out infinite reverse; }`}</style>
 
+```
+  {/* ── 宝石背景装飾 ── */}
+  {/* エメラルドの光 */}
+  <div className="gem1" style={{
+    position:"fixed", top:"-60px", left:"-60px",
+    width:"360px", height:"360px", borderRadius:"50%",
+    background:"radial-gradient(circle at 40% 40%, rgba(0,201,87,0.28) 0%, rgba(0,128,55,0.18) 35%, transparent 70%)",
+    pointerEvents:"none", zIndex:0,
+  }}/>
+  <div className="gem2" style={{
+    position:"fixed", top:"25%", right:"-80px",
+    width:"320px", height:"320px", borderRadius:"50%",
+    background:"radial-gradient(circle at 55% 45%, rgba(50,220,130,0.22) 0%, rgba(0,160,80,0.12) 40%, transparent 70%)",
+    pointerEvents:"none", zIndex:0,
+  }}/>
+  <div className="gem3" style={{
+    position:"fixed", bottom:"-50px", left:"15%",
+    width:"300px", height:"300px", borderRadius:"50%",
+    background:"radial-gradient(circle at 50% 50%, rgba(212,175,55,0.2) 0%, rgba(180,140,30,0.1) 40%, transparent 70%)",
+    pointerEvents:"none", zIndex:0,
+  }}/>
+  <div className="gem4" style={{
+    position:"fixed", top:"55%", left:"-40px",
+    width:"240px", height:"240px", borderRadius:"50%",
+    background:"radial-gradient(circle, rgba(0,180,100,0.18) 0%, transparent 70%)",
+    pointerEvents:"none", zIndex:0,
+  }}/>
+
+  {/* ゴールドのファセットパターン（宝石カット模様） */}
+  <div style={{
+    position:"fixed", inset:0, pointerEvents:"none", zIndex:0, opacity:0.12,
+    backgroundImage:`
+      linear-gradient(60deg, rgba(212,175,55,0.4) 1px, transparent 1px),
+      linear-gradient(-60deg, rgba(212,175,55,0.4) 1px, transparent 1px),
+      linear-gradient(rgba(212,175,55,0.2) 1px, transparent 1px)
+    `,
+    backgroundSize:"60px 52px, 60px 52px, 60px 52px",
+  }}/>
+
+  {/* キラキラ星 */}
+  {[[8,12],[25,45],[72,18],[88,60],[45,80],[60,35],[15,70],[90,30]].map(([x,y],i) => (
+    <div key={i} style={{
+      position:"fixed", left:`${x}%`, top:`${y}%`,
+      width:"3px", height:"3px", borderRadius:"50%",
+      background:"#d4af37",
+      animation:`twinkle ${2.5+i*0.7}s ease-in-out infinite`,
+      animationDelay:`${i*0.4}s`,
+      boxShadow:"0 0 4px 2px rgba(212,175,55,0.6)",
+      pointerEvents:"none", zIndex:0,
+    }}/>
+  ))}
+
+  {/* ── Header ── */}
+  <div style={{
+    background: "linear-gradient(135deg, #0d3d1a 0%, #1a5c28 30%, #0f4820 60%, #0a3015 100%)",
+    padding: "24px 24px 20px",
+    display: "flex", alignItems: "center", justifyContent: "space-between",
+    boxShadow: "0 4px 32px rgba(0,0,0,0.6), 0 1px 0 rgba(212,175,55,0.5) inset, 0 -1px 0 rgba(212,175,55,0.2) inset",
+    position: "relative", overflow: "hidden", zIndex: 1,
+    borderBottom: "2px solid rgba(212,175,55,0.4)",
+  }}>
+    {/* ヘッダー光沢 */}
+    <div style={{
+      position:"absolute", top:0, left:0, right:0, height:"45%",
+      background:"linear-gradient(to bottom, rgba(255,255,255,0.08), transparent)",
+      pointerEvents:"none",
+    }}/>
+    {/* ゴールドシマー */}
+    <div style={{
+      position:"absolute", top:"-50%", left:0,
+      width:"80px", height:"300%",
+      background:"linear-gradient(90deg, transparent, rgba(212,175,55,0.25), rgba(255,255,200,0.15), transparent)",
+      animation:"shimmer 5s ease-in-out infinite",
+      pointerEvents:"none",
+    }}/>
+    {/* 左右の宝石装飾ライン */}
+    <div style={{
+      position:"absolute", bottom:0, left:0, right:0, height:"2px",
+      background:"linear-gradient(90deg, transparent, rgba(212,175,55,0.8), rgba(80,220,120,0.6), rgba(212,175,55,0.8), transparent)",
+      pointerEvents:"none",
+    }}/>
+    <div>
+      <div style={{
+        fontFamily: "'Cormorant Garamond', serif",
+        fontSize: "10px", letterSpacing: "4px",
+        color: "rgba(212,175,55,0.9)", textTransform: "uppercase", marginBottom: "3px", letterSpacing: "5px",
+      }}>Photo Diary</div>
+      <div style={{
+        fontFamily: "'Noto Serif JP', serif",
+        fontSize: "22px", color: "rgba(200,255,220,0.95)", fontWeight: 300, letterSpacing: "2px",
+        textShadow: "0 0 20px rgba(80,220,120,0.4), 0 2px 8px rgba(0,0,0,0.5)",
+      }}>写真日記帳</div>
+      <div style={{
+        fontSize: "11px", color: "rgba(212,175,55,0.85)", marginTop: "3px", letterSpacing: "1px",
+      }}>{currentYear}年 {JUNISHI_EMOJI[yearJunishiIdx]}{JUNISHI[yearJunishiIdx]}年</div>
+    </div>
+    <div style={{ textAlign: "center" }}>
+      <div style={{
+        width: "46px", height: "46px", borderRadius: "50%", margin: "0 auto 3px",
+        background: "rgba(80,180,100,0.25)",
+        border: "1.5px solid rgba(212,175,55,0.6)",
+        display: "flex", alignItems: "center", justifyContent: "center", fontSize: "20px",
+      }}>📷</div>
+      <div style={{ fontSize: "11px", color: "rgba(212,175,55,0.9)" }}>{totalPhotos}枚</div>
+    </div>
+  </div>
+
+  {/* ── Calendar View ── */}
+  {view === "calendar" && (
+    <div className="fade-in" style={{ padding: "18px 12px", maxWidth: "540px", margin: "0 auto", position: "relative", zIndex: 1 }}>
+
+      {/* Month Nav */}
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        marginBottom: "16px",
+        background: "rgba(10,50,20,0.7)",
+        backdropFilter: "blur(24px)",
+        WebkitBackdropFilter: "blur(24px)",
+        borderRadius: "18px",
+        padding: "14px 18px",
+        boxShadow: "0 4px 28px rgba(0,0,0,0.5), 0 1px 0 rgba(212,175,55,0.35) inset",
+        border: "1px solid rgba(212,175,55,0.3)",
+      }}>
+        <button className="btn" onClick={prevMonth} style={{
+          width: "34px", height: "34px", borderRadius: "50%",
+          background: "rgba(30,100,50,0.5)",
+          fontSize: "16px", display: "flex", alignItems: "center", justifyContent: "center",
+          color: "rgba(212,175,55,0.95)",
+          boxShadow: "0 2px 10px rgba(0,0,0,0.4), 0 1px 0 rgba(212,175,55,0.25) inset",
+          border: "1px solid rgba(212,175,55,0.35)",
+        }}>‹</button>
+        <div style={{ textAlign: "center" }}>
+          <div style={{
+            fontFamily: "'Noto Serif JP', serif",
+            fontSize: "24px", fontWeight: 400, color: "rgba(200,255,215,0.95)", letterSpacing: "2px",
+            textShadow: "0 0 16px rgba(80,220,120,0.35), 0 2px 8px rgba(0,0,0,0.5)",
+          }}>{MONTHS[currentMonth]}</div>
+          <div style={{ fontSize: "11px", color: "rgba(212,175,55,0.9)", letterSpacing: "2px", marginTop: "1px" }}>{currentYear}</div>
+        </div>
+        <button className="btn" onClick={nextMonth} style={{
+          width: "34px", height: "34px", borderRadius: "50%",
+          background: "rgba(30,100,50,0.5)",
+          fontSize: "16px", display: "flex", alignItems: "center", justifyContent: "center",
+          color: "rgba(212,175,55,0.95)",
+          boxShadow: "0 2px 10px rgba(0,0,0,0.4), 0 1px 0 rgba(212,175,55,0.25) inset",
+          border: "1px solid rgba(212,175,55,0.35)",
+        }}>›</button>
+      </div>
+
+      {/* Day headers */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: "3px", marginBottom: "5px" }}>
+        {DAYS.map((d, i) => (
+          <div key={d} style={{
+            textAlign: "center", fontSize: "11px", fontWeight: 500,
+            color: i === 0 ? "#ff8888" : i === 6 ? "#80ccff" : "rgba(160,220,180,0.75)",
+            padding: "2px 0",
+          }}>{d}</div>
+        ))}
+      </div>
+
+      {/* Grid */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: "3px" }}>
+        {cells.map((day, i) => {
+          if (!day) return <div key={`e-${i}`} />;
+          const k = key(currentYear, currentMonth, day);
+          const entry = entries[k];
+          const photos = entry?.photos || [];
+          const mainPhoto = photos[0];
+          const isToday = day === today.getDate() && currentMonth === today.getMonth() && currentYear === today.getFullYear();
+          const dow = (firstDay + day - 1) % 7;
+          const rokuyo = getRokuyo(currentYear, currentMonth, day);
+          const lucky = getLuckyDay(currentYear, currentMonth, day);
+          const isLucky = lucky.length > 0;
+          const shadow = mainPhoto ? "0 1px 4px rgba(0,0,0,0.85)" : "none";
+          const rokuyoColor = mainPhoto ? "rgba(255,255,180,0.95)"
+            : isToday ? "rgba(20,40,10,0.9)"
+            : rokuyo === "大安" ? "#d4af37" : rokuyo === "赤口" ? "#ff7777"
+            : rokuyo === "友引" ? "#50e090" : rokuyo === "先勝" ? "#70ccff"
+            : rokuyo === "先負" ? "#b090ff" : "rgba(120,180,140,0.65)";
+
+          return (
+            <button key={day} className="day-cell btn" onClick={() => openEntry(day)} style={{
+              borderRadius: "10px", padding: 0, overflow: "hidden",
+              position: "relative", cursor: "pointer",
+              aspectRatio: "1 / 1.65",
+              background: mainPhoto ? "transparent"
+                : isToday ? "linear-gradient(160deg, rgba(212,175,55,0.7), rgba(180,140,30,0.85))"
+                : isLucky ? "rgba(20,80,40,0.75)"
+                : "rgba(10,40,20,0.65)",
+              border: isToday ? "2px solid rgba(212,175,55,0.9)"
+                : isLucky ? "1.5px solid rgba(212,175,55,0.5)"
+                : "1.5px solid rgba(80,160,100,0.2)",
+              backdropFilter: "blur(8px)",
+              WebkitBackdropFilter: "blur(8px)",
+              boxShadow: isToday ? "0 0 16px rgba(212,175,55,0.4), inset 0 1px 0 rgba(212,175,55,0.3)"
+                : isLucky ? "0 2px 12px rgba(0,0,0,0.4), inset 0 1px 0 rgba(212,175,55,0.15)"
+                : "0 1px 6px rgba(0,0,0,0.3)",
+            }}>
+              {/* 写真背景 */}
+              {mainPhoto && <>
+                <img src={mainPhoto} alt="" style={{ width:"100%", height:"100%", objectFit:"cover", position:"absolute", inset:0 }} />
+                <div style={{ position:"absolute", inset:0, background:"linear-gradient(to bottom, rgba(0,0,0,0.05), rgba(0,0,0,0.6))" }} />
+              </>}
+
+              {/* コンテンツ */}
+              <div style={{
+                position: "relative", height: "100%",
+                display: "flex", flexDirection: "column",
+                alignItems: "center", justifyContent: "space-evenly",
+                padding: "3px 1px",
+              }}>
+                {/* 日付 */}
+                <span style={{
+                  fontSize: "13px", fontWeight: isToday ? 700 : 500, lineHeight: 1,
+                  color: mainPhoto ? "white" : isToday ? "rgba(20,40,10,0.95)" : dow===0 ? "#ff8888" : dow===6 ? "#80ccff" : "rgba(180,240,200,0.95)",
+                  textShadow: shadow,
+                }}>{day}</span>
+
+                {/* 六曜 */}
+                <span style={{
+                  fontSize: "8px", fontWeight: rokuyo==="大安" ? 700 : 400,
+                  lineHeight: 1, letterSpacing: "-0.5px",
+                  color: rokuyoColor, textShadow: mainPhoto ? "0 1px 3px rgba(0,0,0,0.9)" : "none",
+                }}>{rokuyo}</span>
+
+                {/* 開運日（大安除く・文字で表示） */}
+                <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:"1px" }}>
+                  {lucky
+                    .filter(l => l.name !== "大安")
+                    .sort((a,b) => b.rank - a.rank)
+                    .map(l => (
+                      <span key={l.name} style={{
+                        fontSize: "6.5px", lineHeight: 1.2, fontWeight: 700,
+                        letterSpacing: "-0.3px",
+                        color: mainPhoto ? "rgba(255,240,180,0.95)" : isToday ? "rgba(20,40,10,0.9)" : "rgba(212,175,55,0.9)",
+                        textShadow: mainPhoto ? "0 1px 3px rgba(0,0,0,0.9)" : "none",
+                      }}>{l.name}</span>
+                    ))}
+                </div>
+
+                {/* 天気 */}
+                {entry?.weather && (
+                  <span style={{ fontSize: "10px", lineHeight: 1, textShadow: shadow }}>{entry.weather}</span>
+                )}
+              </div>
+
+              {/* 複数写真バッジ */}
+              {photos.length > 1 && (
+                <span style={{
+                  position:"absolute", bottom:"2px", right:"3px",
+                  fontSize:"7px", color:"white", fontWeight:700,
+                  textShadow:"0 1px 3px rgba(0,0,0,1)",
+                }}>+{photos.length-1}</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* 凡例 */}
+      <div style={{
+        marginTop: "14px",
+        background: "rgba(8,35,16,0.8)",
+        backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)",
+        borderRadius: "14px",
+        padding: "12px 14px",
+        boxShadow: "0 4px 24px rgba(0,0,0,0.5), 0 1px 0 rgba(212,175,55,0.25) inset",
+        border: "1px solid rgba(212,175,55,0.25)",
+      }}>
+        <div style={{ fontSize: "10px", color: "rgba(212,175,55,0.9)", letterSpacing: "2px", marginBottom: "8px", fontWeight: 500 }}>六曜・開運日</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "5px 10px", marginBottom: "7px" }}>
+          {ROKUYO.map(r => (
+            <span key={r} style={{ fontSize: "10px", color: r==="大安" ? "rgba(212,175,55,0.95)" : "rgba(160,220,180,0.8)", fontWeight: r==="大安"?700:400 }}>
+              {r === "大安" ? "✦ " : ""}{r}
+            </span>
+          ))}
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "5px" }}>
+          <span style={{ fontSize: "10px", color: "#c0392b", background: "#fff5f5", borderRadius: "8px", padding: "1px 7px", border: "1px solid #f5c0c0" }}>天赦日</span>
+          <span style={{ fontSize: "10px", color: "#d4820a", background: "#fffbee", borderRadius: "8px", padding: "1px 7px", border: "1px solid #f5e0a0" }}>一粒万倍日</span>
+          <span style={{ fontSize: "10px", color: "#7b5ea7", background: "#f8f4ff", borderRadius: "8px", padding: "1px 7px", border: "1px solid #ddd0f0" }}>寅の日</span>
+          <span style={{ fontSize: "10px", color: "#5daa6e", background: "#f4fff8", borderRadius: "8px", padding: "1px 7px", border: "1px solid #b8e8c8" }}>巳の日</span>
+        </div>
+      </div>
+
+      {/* Stats */}
+      <div style={{
+        marginTop: "10px",
+        background: "rgba(8,35,16,0.8)",
+        backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)",
+        borderRadius: "14px",
+        padding: "12px 16px",
+        boxShadow: "0 4px 24px rgba(0,0,0,0.5), 0 1px 0 rgba(212,175,55,0.25) inset",
+        border: "1px solid rgba(212,175,55,0.25)",
+        display: "flex",
+      }}>
+        {[
+          { label: "今月の記録", value: monthEntries, unit: "日" },
+          { label: "今月の写真", value: monthPhotos, unit: "枚" },
+          { label: "総写真数", value: totalPhotos, unit: "枚" },
+        ].map((s, i) => (
+          <div key={s.label} style={{
+            flex: 1, textAlign: "center",
+            borderRight: i < 2 ? "1px solid rgba(212,175,55,0.2)" : "none",
+          }}>
+            <div style={{
+              fontFamily: "'Cormorant Garamond', serif",
+              fontSize: "22px", color: "rgba(212,175,55,0.95)", fontWeight: 400,
+            }}>{s.value}<span style={{ fontSize: "11px" }}>{s.unit}</span></div>
+            <div style={{ fontSize: "10px", color: "rgba(120,200,150,0.7)" }}>{s.label}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )}
+
+  {/* ── Entry View ── */}
+  {view === "entry" && selectedDay && (
+    <div className="fade-in" style={{ maxWidth: "540px", margin: "0 auto" }}>
+      {/* Header */}
+      <div style={{
+        background: "rgba(8,35,16,0.85)", backdropFilter:"blur(24px)", WebkitBackdropFilter:"blur(24px)",
+        padding: "14px 14px 0",
+        borderBottom: "1px solid rgba(212,175,55,0.25)",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "12px" }}>
+          <button className="btn" onClick={() => setView("calendar")} style={{
+            width: "34px", height: "34px", borderRadius: "50%",
+            background: "rgba(30,100,50,0.5)",
+            fontSize: "17px", display: "flex", alignItems: "center", justifyContent: "center",
+            color: "rgba(212,175,55,0.95)",
+            boxShadow: "0 2px 10px rgba(0,0,0,0.4), 0 1px 0 rgba(212,175,55,0.25) inset",
+            border: "1px solid rgba(212,175,55,0.35)",
+          }}>←</button>
+          <div style={{ flex: 1 }}>
+            <div style={{
+              fontFamily: "'Noto Serif JP', serif",
+              fontSize: "18px", fontWeight: 400, color: "rgba(200,255,220,0.95)", letterSpacing: "1px", textShadow:"0 0 16px rgba(80,220,120,0.3), 0 2px 6px rgba(0,0,0,0.5)",
+            }}>{currentYear}年{MONTHS[currentMonth]}{selectedDay}日
+              <span style={{ fontSize: "13px", color: "rgba(160,220,180,0.8)", marginLeft: "6px" }}>
+                {DAYS[new Date(currentYear, currentMonth, selectedDay).getDay()]}曜日
+              </span>
+            </div>
+              {/* 六曜・開運日 */}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "5px", marginTop: "5px" }}>
+              <span style={{
+                padding: "2px 8px", borderRadius: "20px", fontSize: "11px", fontWeight: 500,
+                background: "rgba(10,50,25,0.6)",
+                color: entryRokuyo ? "rgba(212,175,55,0.95)" : "rgba(120,200,150,0.5)",
+                border: `1px solid ${entryRokuyo ? ROKUYO_COLOR[entryRokuyo] + "66" : "rgba(255,200,100,0.3")}`,
+              }}>{entryRokuyo}</span>
+
+              {entryLucky.filter(l => l.name !== "大安").map(l => (
+                <span key={l.name} style={{
+                  padding: "2px 8px", borderRadius: "20px", fontSize: "11px", fontWeight: 600,
+                  background: "rgba(10,50,25,0.6)",
+                  color: "rgba(212,175,55,0.9)",
+                  border: `1px solid rgba(212,175,55,0.3)`,
+                }}>{l.name}</span>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ padding: "14px", position: "relative", zIndex: 1, background: "transparent" }}>
+        {/* Photos */}
+        <div style={{
+          background: "rgba(8,35,16,0.75)", backdropFilter:"blur(16px)", WebkitBackdropFilter:"blur(16px)",
+          borderRadius: "14px",
+          padding: "13px", marginBottom: "10px",
+          boxShadow: "0 4px 24px rgba(0,0,0,0.5), 0 1px 0 rgba(212,175,55,0.2) inset",
+          border: "1px solid rgba(212,175,55,0.2)",
+        }}>
+          <div style={{
+            fontSize: "11px", color: "#a08060", letterSpacing: "1px",
+            marginBottom: "10px", display: "flex", justifyContent: "space-between",
+          }}>
+            <span>写真</span>
+            <span style={{ color: "#c0a070" }}>{draft.photos.length} / 9枚</span>
+          </div>
+          <PhotoGrid photos={draft.photos} onAdd={addPhoto} onRemove={removePhoto}
+            onOpen={i => setLightbox({ photos: draft.photos, index: i })} />
+        </div>
+
+        {/* Weather */}
+        <div style={{
+          background: "rgba(8,35,16,0.75)", backdropFilter:"blur(16px)", WebkitBackdropFilter:"blur(16px)",
+          borderRadius: "14px",
+          padding: "12px 13px", marginBottom: "10px",
+          boxShadow: "0 2px 12px rgba(200,140,60,0.1)",
+          border: "1px solid rgba(255,200,100,0.2)",
+        }}>
+          <div style={{ fontSize: "11px", color: "rgba(160,220,180,0.75)", letterSpacing: "1px", marginBottom: "9px" }}>今日の天気</div>
+          <div style={{ display: "flex", gap: "5px" }}>
+            {WEATHERS.map(w => (
+              <button key={w.emoji} className="btn"
+                onClick={() => setDraft(d => ({ ...d, weather: d.weather === w.emoji ? null : w.emoji }))}
+                style={{
+                  flex: 1, padding: "7px 2px", borderRadius: "10px",
+                  background: draft.weather === w.emoji
+                    ? "linear-gradient(135deg, rgba(30,120,60,0.8), rgba(50,180,100,0.6))"
+                    : "rgba(10,50,25,0.6)",
+                  border: draft.weather === w.emoji ? "2px solid rgba(212,175,55,0.8)" : "2px solid rgba(80,160,100,0.2)",
+                  display: "flex", flexDirection: "column", alignItems: "center", gap: "2px",
+                  transition: "all 0.2s",
+                  boxShadow: draft.weather === w.emoji ? "0 2px 8px rgba(90,171,221,0.35)" : "none",
+                }}>
+                <span style={{ fontSize: "18px" }}>{w.emoji}</span>
+                <span style={{ fontSize: "8px", color: draft.weather === w.emoji ? "rgba(212,175,55,0.95)" : "rgba(120,200,150,0.7)" }}>{w.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Compass */}
+        <LuckyCompass year={currentYear} month={currentMonth} />
+
+        {/* Text */}
+        <div style={{
+          background: "rgba(8,35,16,0.75)", backdropFilter:"blur(16px)", WebkitBackdropFilter:"blur(16px)",
+          borderRadius: "14px",
+          padding: "12px 13px", marginBottom: "14px",
+          boxShadow: "0 2px 12px rgba(200,140,60,0.1)",
+          border: "1px solid rgba(255,200,100,0.2)",
+        }}>
+          <div style={{ fontSize: "11px", color: "rgba(160,220,180,0.75)", letterSpacing: "1px", marginBottom: "8px" }}>日記</div>
+          <textarea
+            value={draft.text}
+            onChange={e => setDraft(d => ({ ...d, text: e.target.value }))}
+            placeholder="今日の出来事を書いてみよう..."
+            rows={5}
+            style={{
+              width: "100%", border: "none", resize: "none",
+              fontSize: "15px", lineHeight: "1.9", color: "rgba(200,245,220,0.92)",
+              background: "transparent",
+              fontFamily: "'Noto Serif JP', 'Hiragino Mincho ProN', serif",
+            }}
+          />
+          <div style={{ textAlign: "right", fontSize: "11px", color: "rgba(120,180,140,0.5)" }}>
+            {draft.text.length}文字
+          </div>
+        </div>
+
+        {/* Save/Delete */}
+        <div style={{ display: "flex", gap: "10px" }}>
+          {entries[key(currentYear, currentMonth, selectedDay)] && (
+            <button className="btn"
+              onClick={() => {
+                const k = key(currentYear, currentMonth, selectedDay);
+                setEntries(prev => { const n = { ...prev }; delete n[k]; return n; });
+                setView("calendar");
+              }}
+              style={{
+                padding: "13px 15px", borderRadius: "13px",
+                background: "rgba(20,60,30,0.6)", border: "1.5px solid rgba(212,175,55,0.3)",
+                fontSize: "16px", cursor: "pointer",
+              }}>🗑</button>
+          )}
+          <button className="btn" onClick={saveEntry} style={{
+            flex: 1, padding: "13px", borderRadius: "13px",
+            background: "linear-gradient(135deg, #1a6b30, #2a9a48, #d4af37, #2a9a48, #1a6b30)",
+            color: "white", fontSize: "14px", letterSpacing: "2px",
+            fontFamily: "'Noto Serif JP', serif", fontWeight: 500,
+            boxShadow: "0 4px 28px rgba(0,0,0,0.5), 0 1px 0 rgba(212,175,55,0.5) inset",
+            cursor: "pointer",
+            textShadow: "0 1px 4px rgba(0,0,0,0.5)",
+          }}>保存する</button>
+        </div>
+      </div>
+    </div>
+  )}
+
+  {lightbox && (
+    <Lightbox photos={lightbox.photos} index={lightbox.index} onClose={() => setLightbox(null)} />
+  )}
+</div>
+```
+
+);
 }
-
-document.getElementById("calendar").innerHTML=html;
-
-}
-
-function viewImage(src){
-
-let w=window.open("");
-
-w.document.write(`<img src="${src}" style="width:100%">`);
-
-}
-
-function buildGraph(){
-
-let diary=JSON.parse(localStorage.diary||"[]");
-
-let moods={};
-
-diary.forEach(d=>{
-
-moods[d.mood]=(moods[d.mood]||0)+1;
-
-});
-
-let ctx=document.getElementById("moodChart");
-
-new Chart(ctx,{
-
-type:"bar",
-
-data:{
-
-labels:Object.keys(moods),
-
-datasets:[{
-
-data:Object.values(moods)
-
-}]
-
-}
-
-});
-
-}
-
-function backup(){
-
-let data=localStorage.diary||"[]";
-
-let blob=new Blob([data],{type:"application/json"});
-
-let a=document.createElement("a");
-
-a.href=URL.createObjectURL(blob);
-
-a.download="diary_backup.json";
-
-a.click();
-
-}
-
-if("serviceWorker" in navigator){
-
-navigator.serviceWorker.register("sw.js");
-
-}
-
-loadDiary();
-
-buildCalendar();
-
-buildGraph();
-
-</script>
-
-</body>
-
-</html>

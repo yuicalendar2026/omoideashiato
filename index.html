@@ -639,9 +639,6 @@
                             }}>{l.name}</span>
                           ))}
                         </div>
-                        {moonPhase && (
-                          <span style={{fontSize:"11px", lineHeight:1, textShadow:shadow}}>{moonPhase}</span>
-                        )}
                         {entry?.weather && (
                           <span style={{fontSize:"10px", lineHeight:1, textShadow:shadow}}>{entry.weather}</span>
                         )}
@@ -652,6 +649,13 @@
                           fontSize:"7px", color:"white", fontWeight:700,
                           textShadow:"0 1px 3px rgba(0,0,0,1)",
                         }}>+{photos.length-1}</span>
+                      )}
+                      {moonPhase && (
+                        <span style={{
+                          position:"absolute", top:"2px", right:"3px",
+                          fontSize:"10px", lineHeight:1,
+                          filter: mainPhoto ? "drop-shadow(0 1px 2px rgba(0,0,0,0.8))" : "none",
+                        }}>{moonPhase}</span>
                       )}
                     </button>
                   );

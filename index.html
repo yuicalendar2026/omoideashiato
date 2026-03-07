@@ -192,6 +192,25 @@
       return lucky;
     }
 
+    // ── 月相（新月・満月）────────────────────────────────────
+    function getMoonPhase(year, month, day) {
+      // 朔（新月）のユリウス日リストを使って月相を計算
+      const moons = getLunarNewMoons(year);
+      const jd = toJD(year, month, day);
+      // 直近の新月を探す
+      let prevNew = moons[0];
+      for (let i = 0; i < moons.length; i++) {
+        if (moons[i] <= jd) prevNew = moons[i];
+        else break;
+      }
+      const age = jd - prevNew; // 新月からの日数（synodic month ≈ 29.53日）
+      const synodic = 29.530588861;
+      const phase = age / synodic; // 0〜1
+      if (age <= 0.9 || age >= synodic - 0.9) return "🌑"; // 新月
+      if (Math.abs(phase - 0.5) <= 0.03) return "🌕";      // 満月
+      return null;
+    }
+
     function getDaysInMonth(y, m) { return new Date(y, m + 1, 0).getDate(); }
     function getFirstDay(y, m) { return new Date(y, m, 1).getDay(); }
     const today = new Date();
@@ -569,6 +588,7 @@
                   const dow = (firstDay+day-1)%7;
                   const rokuyo = getRokuyo(currentYear, currentMonth, day);
                   const lucky = getLuckyDay(currentYear, currentMonth, day);
+                  const moonPhase = getMoonPhase(currentYear, currentMonth, day);
                   const isLucky = lucky.length > 0;
                   const shadow = mainPhoto ? "0 1px 4px rgba(0,0,0,0.85)" : "none";
                   const rokuyoColor = mainPhoto ? "rgba(255,255,180,0.95)"
@@ -619,6 +639,9 @@
                             }}>{l.name}</span>
                           ))}
                         </div>
+                        {moonPhase && (
+                          <span style={{fontSize:"11px", lineHeight:1, textShadow:shadow}}>{moonPhase}</span>
+                        )}
                         {entry?.weather && (
                           <span style={{fontSize:"10px", lineHeight:1, textShadow:shadow}}>{entry.weather}</span>
                         )}
@@ -641,7 +664,7 @@
                 padding:"12px 14px", boxShadow:"0 2px 16px rgba(0,0,0,0.07)",
                 border:"1px solid rgba(220,220,240,0.8)",
               }}>
-                <div style={{fontSize:"10px", color:"#9980d0", letterSpacing:"2px", marginBottom:"8px", fontWeight:500}}>六曜・開運日</div>
+                <div style={{fontSize:"10px", color:"#9980d0", letterSpacing:"2px", marginBottom:"8px", fontWeight:500}}>六曜・開運日・月相</div>
                 <div style={{display:"flex", flexWrap:"wrap", gap:"5px 10px", marginBottom:"7px"}}>
                   {ROKUYO.map(r => (
                     <span key={r} style={{fontSize:"10px", color:r==="大安"?"#e07030":"#555577", fontWeight:r==="大安"?700:400}}>
@@ -654,6 +677,8 @@
                   <span style={{fontSize:"10px",color:"#d4820a",background:"#fffbee",borderRadius:"8px",padding:"1px 7px",border:"1px solid #f5e0a0"}}>一粒万倍日</span>
                   <span style={{fontSize:"10px",color:"#7b5ea7",background:"#f8f4ff",borderRadius:"8px",padding:"1px 7px",border:"1px solid #ddd0f0"}}>寅の日</span>
                   <span style={{fontSize:"10px",color:"#5daa6e",background:"#f4fff8",borderRadius:"8px",padding:"1px 7px",border:"1px solid #b8e8c8"}}>巳の日</span>
+                  <span style={{fontSize:"10px",color:"#334466",background:"#f0f4ff",borderRadius:"8px",padding:"1px 7px",border:"1px solid #c8d4f0"}}>🌑 新月</span>
+                  <span style={{fontSize:"10px",color:"#665500",background:"#fffdf0",borderRadius:"8px",padding:"1px 7px",border:"1px solid #e8e0a0"}}>🌕 満月</span>
                 </div>
               </div>
 
